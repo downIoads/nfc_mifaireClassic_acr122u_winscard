@@ -1,3 +1,4 @@
+// thanks @gentilkiwi for reviewing my code and providing the base construct for the improved version!
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
