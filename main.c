@@ -87,7 +87,7 @@ void CombineArrays(const BYTE* arr1, UINT16 arr1Length, const BYTE* arr2, UINT16
 }
 
 int main() {
-	const BYTE Msg[] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', '\0' };	// msg to write
+	const BYTE Msg[] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', '\0' };	// msg to write
 	BYTE block = 0x24;	// target block for write
 
 	// user is done here
@@ -113,12 +113,12 @@ int main() {
 	}
 
 	UINT16 msgLength = sizeof(Msg) / sizeof(Msg[0]);
-	if (msgLength > 16) {
-		wprintf(L"Your message is too long! Only 15 bytes allowed (excluding mandatory NULL).\n");
+	if (msgLength > 17) {
+		wprintf(L"Your message is too long! Only 16 bytes allowed (excluding mandatory NULL).\n");
 		return 1;
 	}
 
-	const BYTE APDU_Write_Base[] = { 0xff, 0xd6, 0x00, block, 0x10, (BYTE)msgLength };
+	const BYTE APDU_Write_Base[] = { 0xff, 0xd6, 0x00, block, 0x10 };
 	UINT16 apduWriteBaseLength = sizeof(APDU_Write_Base) / sizeof(APDU_Write_Base[0]);
 
 	// calculate size of resulting array (after combining APDU_Write_Base and Msg)
@@ -140,7 +140,7 @@ int main() {
 
 	// preparations are complete
 	printf("Writing message:\n");
-	for (size_t i = 6; i < apduWrite_Length; i++) {		// first few chars are not part of message that will be written so skip printing them
+	for (size_t i = 5; i < apduWrite_Length; i++) {		// first few chars are not part of message that will be written so skip printing them
 		printf("%c ", APDU_Write[i]);
 	}
 	printf("\n");
@@ -201,4 +201,3 @@ int main() {
 
 	return 0;
 }
-
