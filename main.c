@@ -1,9 +1,9 @@
 // thanks @gentilkiwi for reviewing my code and providing the base construct for the improved version!
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include <winscard.h>
-
 
 typedef struct _SCARD_DUAL_HANDLE {
 	SCARDCONTEXT hContext;
@@ -87,19 +87,19 @@ void CombineArrays(const BYTE* arr1, UINT16 arr1Length, const BYTE* arr2, UINT16
 }
 
 int main() {
-	const BYTE Msg[] = { 'l', 'o', 'i', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h','i', 'v', 'k', 'k', '\0' };
+	const BYTE Msg[] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', '\0' };	// msg to write
 	BYTE block = 0x24;	// target block for write
-	
+
 	// user is done here
 
 	// allowed values for block (assuming non-magic tag)
-	BYTE allowedBlocks[] = {	0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A,
-								0x0C, 0x0D, 0x0E, 0x10, 0x11, 0x12, 0x14, 0x15,
-								0x16, 0x18, 0x19, 0x1A, 0x1C, 0x1D, 0x1E, 0x20,
-								0x21, 0x22, 0x24, 0x25, 0x26, 0x28, 0x29, 0x2A,
-								0x2C, 0x2D, 0x2E, 0x30, 0x31, 0x32, 0x34, 0x35,
-								0x36, 0x38, 0x39, 0x3A, 0x3C, 0x3D, 0x3E };
-	
+	BYTE allowedBlocks[] = { 0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A,
+							 0x0C, 0x0D, 0x0E, 0x10, 0x11, 0x12, 0x14, 0x15,
+							 0x16, 0x18, 0x19, 0x1A, 0x1C, 0x1D, 0x1E, 0x20,
+							 0x21, 0x22, 0x24, 0x25, 0x26, 0x28, 0x29, 0x2A,
+							 0x2C, 0x2D, 0x2E, 0x30, 0x31, 0x32, 0x34, 0x35,
+							 0x36, 0x38, 0x39, 0x3A, 0x3C, 0x3D, 0x3E };
+
 	bool allowedBlock = false;
 	for (int i = 0; i < sizeof(allowedBlocks); ++i) {
 		if (allowedBlocks[i] == block) {
@@ -114,19 +114,18 @@ int main() {
 
 	UINT16 msgLength = sizeof(Msg) / sizeof(Msg[0]);
 	if (msgLength > 16) {
-		wprintf(L"Your message is too long! Only 15 bytes allowed (excluding NULL).\n");
+		wprintf(L"Your message is too long! Only 15 bytes allowed (excluding mandatory NULL).\n");
 		return 1;
 	}
 
-
-	const BYTE APDU_Write_Base[] = { 0xff, 0xd6, 0x00, block, 0x10, BYTE(msgLength) };
+	const BYTE APDU_Write_Base[] = { 0xff, 0xd6, 0x00, block, 0x10, (BYTE)msgLength };
 	UINT16 apduWriteBaseLength = sizeof(APDU_Write_Base) / sizeof(APDU_Write_Base[0]);
 
 	// calculate size of resulting array (after combining APDU_Write_Base and Msg)
 	UINT16 apduWrite_Length = apduWriteBaseLength + msgLength;
 
 	// create new array that will hold the merged data
-	BYTE* APDU_Write = (BYTE *)malloc(apduWrite_Length * sizeof(APDU_Write_Base[0]));
+	BYTE* APDU_Write = (BYTE*)malloc(apduWrite_Length * sizeof(APDU_Write_Base[0]));
 
 	// combine arrays APDU_Write_Base and Msg and store in APDU_Write
 	CombineArrays(APDU_Write_Base, apduWriteBaseLength, Msg, msgLength, APDU_Write);
@@ -140,13 +139,16 @@ int main() {
 	UINT16 cbBuffer;	// usually will be 2 (e.g. response 90 00 for success)
 
 	// preparations are complete
-
-	for (UINT16 i = 0; i < apduWrite_Length; i++) {
+	printf("Writing message:\n");
+	for (size_t i = 6; i < apduWrite_Length; i++) {		// first few chars are not part of message that will be written so skip printing them
 		printf("%c ", APDU_Write[i]);
 	}
 	printf("\n");
 
-	if (OpenReader(L"ACS ACR122U PICC Interface 0", &hDual))
+
+	// my Laptop:	"ACS ACR122U PICC Interface 0"
+	// my PC:		"ACS ACR122 0"
+	if (OpenReader(L"ACS ACR122 0", &hDual))
 	{
 
 		cbBuffer = 2;
@@ -154,17 +156,38 @@ int main() {
 		{
 			wprintf(L"Default Key A has been loaded.\n");
 		}
+		// make sure this operation was successful, terminate if not
+		if (!(Buffer[0] == 0x90 && Buffer[1] == 0x00)) {
+			CloseReader(&hDual);
+			wprintf(L"Error code received. Aborting..\n");
+			free(APDU_Write);
+			return 1;
+		}
 
 		cbBuffer = 2;
 		if (SendRecvReader(&hDual, APDU_Authenticate_Block, sizeof(APDU_Authenticate_Block), Buffer, &cbBuffer))
 		{
 			wprintf(L"Block has been authenticated.\n");
 		}
+		// make sure this operation was successful, terminate if not
+		if (!(Buffer[0] == 0x90 && Buffer[1] == 0x00)) {
+			CloseReader(&hDual);
+			wprintf(L"Error code received. Aborting..\n");
+			free(APDU_Write);
+			return 1;
+		}
 
 		cbBuffer = 2;
 		if (SendRecvReader(&hDual, APDU_Write, apduWrite_Length, Buffer, &cbBuffer))
 		{
 			wprintf(L"Data has successfully been written to the block!\n");
+		}
+		// make sure this operation was successful, terminate if not
+		if (!(Buffer[0] == 0x90 && Buffer[1] == 0x00)) {
+			CloseReader(&hDual);
+			wprintf(L"Error code received. Aborting..\n");
+			free(APDU_Write);
+			return 1;
 		}
 
 
@@ -178,3 +201,4 @@ int main() {
 
 	return 0;
 }
+
