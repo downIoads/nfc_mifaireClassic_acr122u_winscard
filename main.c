@@ -96,7 +96,7 @@ void CombineArrays(const BYTE* arr1, UINT16 arr1Length, const BYTE* arr2, UINT16
 	}
 }
 
-int WriteToTag(const BYTE* Msg, UINT16 msgLength, BYTE block) {
+int WriteToTag(const BYTE* Msg, BYTE block) {
 	bool allowedBlock = false;
 	for (int i = 0; i < sizeof(allowedBlocks); ++i) {
 		if (allowedBlocks[i] == block) {
@@ -109,25 +109,16 @@ int WriteToTag(const BYTE* Msg, UINT16 msgLength, BYTE block) {
 		return 1;
 	}
 
-	// TODO: this might be the error (if instead of characters there is binary data passed). so instead just pass msgLength to the function
-	// UINT16 msgLength = strlen((const char*)Msg); 
-
+	/*
 	if (msgLength > 17) {
 		wprintf(L"Your message is too long! Only 16 bytes allowed (excluding mandatory NULL).\n");
 		return 1;
 	}
+	*/
 
-	const BYTE APDU_Write_Base[] = { 0xff, 0xd6, 0x00, block, 0x10 };
-	UINT16 apduWriteBaseLength = sizeof(APDU_Write_Base) / sizeof(APDU_Write_Base[0]);
-
-	// calculate size of resulting array (after combining APDU_Write_Base and Msg)
-	UINT16 apduWrite_Length = apduWriteBaseLength + msgLength;
-
-	// create new array that will hold the merged data
-	BYTE* APDU_Write = (BYTE*)malloc(apduWrite_Length * sizeof(APDU_Write_Base[0]));
-
-	// combine arrays APDU_Write_Base and Msg and store in APDU_Write
-	CombineArrays(APDU_Write_Base, apduWriteBaseLength, Msg, msgLength, APDU_Write);
+	BYTE APDU_Write[5 + 16] = { 0xff, 0xd6, 0x00, block, 0x10 };	// base command 5 bytes + msg up to 16 bytes
+	UINT16 apduWriteBaseLength = sizeof(APDU_Write) / sizeof(APDU_Write[0]);
+	memcpy(APDU_Write + 5, Msg, 16);
 
 
 	const BYTE APDU_LoadDefaultKey[] = { 0xff, 0x82, 0x00, 0x00, 0x06, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
@@ -139,7 +130,7 @@ int WriteToTag(const BYTE* Msg, UINT16 msgLength, BYTE block) {
 
 	// preparations are complete
 	printf("Writing Hex:\n");
-	for (UINT16 i = 5; i < apduWrite_Length; ++i) {		// first few chars are not part of message that will be written so skip printing them
+	for (UINT16 i = 0; i < 21; ++i) {		// first few chars are not part of message that will be written so skip printing them
 		printf("0x%02X ", APDU_Write[i]);
 	}
 	printf("\n");
@@ -177,7 +168,7 @@ int WriteToTag(const BYTE* Msg, UINT16 msgLength, BYTE block) {
 		}
 
 		cbBuffer = 2;
-		if (SendRecvReader(&hDual, APDU_Write, apduWrite_Length, Buffer, &cbBuffer))
+		if (SendRecvReader(&hDual, APDU_Write, 23, Buffer, &cbBuffer))
 		{
 			wprintf(L"Data has successfully been written to the block!\n");
 		}
@@ -196,7 +187,7 @@ int WriteToTag(const BYTE* Msg, UINT16 msgLength, BYTE block) {
 		wprintf(L"Failed to find NFC reader.\n");
 	}
 
-	free(APDU_Write);
+	//free(APDU_Write);
 
 	return 0;
 }
@@ -277,19 +268,15 @@ int ReadFromTag(BYTE block) {
 	return 0;
 }
 
-// todo complete this function (not ready yet)
-/*
 int ResetCardContents() {
-	const BYTE Msg[] = { 0x00 , 0x00 , 0x00, 0x00 , 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 , '\0' };
+	// empty every writable block
+	const BYTE Msg[16] = { 0x00 };
 	
-	// get size of message
-	UINT16 msgSize = sizeof(Msg) / sizeof(Msg[0]);
-
 	// get size of global allowedBlocks array (amount of elements)
 	UINT16 arraySize = sizeof(allowedBlocks) / sizeof(allowedBlocks[0]);
 
 	for (UINT16 i = 0; i < arraySize; ++i) {
-		UINT16 status_code = WriteToTag(Msg, msgSize, allowedBlocks[i]);
+		UINT16 status_code = WriteToTag(Msg, allowedBlocks[i]);
 		if (status_code != 0) {
 			printf("Error occured while writing! Terminating.");
 			return 1;
@@ -299,11 +286,10 @@ int ResetCardContents() {
 	printf("\nSuccessfully reset card contents.\n");
 	return 0;
 }
-*/
 
 int main() {
-	const BYTE Msg[] = { 0x00 }; // why does writing to a block work for the array below but not for this one? i have tried with \0 but no success
-	// const BYTE Msg[] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', '\0' };	// msg to write
+	// const BYTE Msg[16] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p' };
+	const BYTE Msg[16] = { 0x00 };
 	BYTE block = 0x34;	// target block for write
 
 	// ----------------------
@@ -312,9 +298,9 @@ int main() {
 	// ----------------------
 
 	// choose function to run (uncomment):
-	WriteToTag(Msg, msgSize, block);
+	// WriteToTag(Msg, block);
 	// ReadFromTag(block);
-	// ResetCardContents();
+	ResetCardContents();
 
 	return 0;
 }
