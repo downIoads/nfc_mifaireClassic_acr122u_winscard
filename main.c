@@ -19,6 +19,15 @@ const BYTE allowedBlocks[] = {  0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A,
 								0x2C, 0x2D, 0x2E, 0x30, 0x31, 0x32, 0x34, 0x35,
 								0x36, 0x38, 0x39, 0x3A, 0x3C, 0x3D, 0x3E };
 
+// for dumping entire card (read only)
+const BYTE allBlocks[] = {  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 
+						    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+							0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+							0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+							0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+							0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F,
+							0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+							0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F };
 
 void PrintHex(LPCBYTE pbData, DWORD cbData)
 {
@@ -192,7 +201,7 @@ int WriteToTag(const BYTE* Msg, BYTE block) {
 	return 0;
 }
 
-int ReadFromTag(BYTE block) {
+int ReadFromTag(BYTE block, bool dump) {
 	
 	const BYTE APDU_Read[] = { 0xff, 0xb0, 0x00, block, 0x10 };	// page 16 of ACR122U_APIDriverManual.pdf (reads 16 bytes, and the page number is a coincidence)
 	UINT16 apduReadLength = sizeof(APDU_Read) / sizeof(APDU_Read[0]);
@@ -253,11 +262,47 @@ int ReadFromTag(BYTE block) {
 			return 1;
 		}
 
-		wprintf(L"Successfully read block.\nTrying to print read data in human-readable form:\n");
-		for (int i = 0; i < 16; i++) {		// any text would have ended with \n so dont read last Byte
-			printf("%c ", Buffer[i]);
+		// print actual characters in cmd if we are not dumping the full card
+		if (!dump) {
+			wprintf(L"Successfully read block.");
+			wprintf(L"Trying to print read data in human-readable form:\n");
+			for (int i = 0; i < 16; i++) {		// any text would have ended with \n so dont read last Byte
+				printf("%c ", Buffer[i]);
+			}
+			printf("\n");
 		}
-		printf("\n");
+
+		// if dump then write read data to fille
+		if (dump) {
+			// open file
+			FILE* fp;
+			int err = fopen_s(&fp, "dump.txt", "a");
+			if (err != 0) {
+				printf("Error opening the file.\n");
+				CloseReader(&hDual);
+				return 1;
+			}
+
+			if (fp != NULL) {
+				// each line of the file should start with block #
+				fprintf(fp, "[%02X] ", block);
+				// write from BUFFER (but not last two status bytes)
+				for (int i = 0; i < 16; i++) {
+					fprintf(fp, "%02X ", Buffer[i]);
+				}
+				fprintf(fp, "\n"); // newline to prepare for next iteration
+
+				// close file
+				fclose(fp);
+			}
+			else {
+				printf("ERROR: FD is zero. Stopping execution..\n");
+				CloseReader(&hDual);
+				return 1;
+			}
+
+		}
+
 
 		CloseReader(&hDual);
 	}
@@ -287,10 +332,28 @@ int ResetCardContents() {
 	return 0;
 }
 
+int DumpCard() {
+	// get size of global allowedBlocks array (amount of elements)
+	UINT16 arraySize = sizeof(allBlocks) / sizeof(allBlocks[0]);
+
+	for (UINT16 i = 0; i < arraySize; ++i) {
+		UINT16 status_code = ReadFromTag(allBlocks[i], true);
+		if (status_code != 0) {
+			printf("Error occured while trying to dump card! Terminating.");
+			return 1;
+		}
+		// wait between iterations to avoid errors with opening/closing file
+		Sleep(100);	// 100 ms usually works, shorter times can lead to a failed dump
+	}
+
+	printf("\nSuccessfully dumped card content to dump.txt.\n");
+	return 0;
+}
+
 int main() {
-	// const BYTE Msg[16] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p' };
-	const BYTE Msg[16] = { 0x00 };
-	BYTE block = 0x34;	// target block for write
+	const BYTE Msg[16] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p' };
+	// const BYTE Msg[16] = { 0x00 };	// empty the given block
+	BYTE block = 0x3D;	// target block for write
 
 	// ----------------------
 	// determine size of array now (because you cant do that later on from a pointer)
@@ -299,8 +362,9 @@ int main() {
 
 	// choose function to run (uncomment):
 	// WriteToTag(Msg, block);
-	// ReadFromTag(block);
-	ResetCardContents();
+	// ReadFromTag(block, false);	// true / false (store block content in file dump.txt / dont)
+	// ResetCardContents();
+	DumpCard();
 
 	return 0;
 }
