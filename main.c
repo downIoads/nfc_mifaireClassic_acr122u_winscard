@@ -134,8 +134,9 @@ int WriteToTag(const BYTE* Msg, BYTE block, bool allowUnsafeTargetBlocks) {
 	UINT16 apduWriteBaseLength = sizeof(APDU_Write) / sizeof(APDU_Write[0]);
 	memcpy(APDU_Write + 5, Msg, 16);
 
-
+	// use line below for DEFAULT KEY A
 	const BYTE APDU_LoadDefaultKey[] = { 0xff, 0x82, 0x00, 0x00, 0x06, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+
 	const BYTE APDU_Authenticate_Block[] = { 0xff, 0x86, 0x00, 0x00, 0x05, 0x01, 0x00, block, 0x60, 0x00 };
 
 	SCARD_DUAL_HANDLE hDual;
@@ -193,7 +194,6 @@ int WriteToTag(const BYTE* Msg, BYTE block, bool allowUnsafeTargetBlocks) {
 			free(APDU_Write);
 			return 1;
 		}
-
 
 		CloseReader(&hDual);
 	}
@@ -355,42 +355,63 @@ int DumpCard() {
 	return 0;
 }
 
-// formats the card for NDEF
+// formats the card for NDEF (only works once because it assumes key A of every sector to be the default one
+// after running this code the mifare classic 1k becomes compatible with almost every modern smartphone!! :)
 int FormatNDEF() {
-	// STEP 1: Adjust trailer sector 0
-	const BYTE SectorZeroMsg[16] = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x78, 0x77, 0x88, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-	BYTE SectorZeroBlock = 0x03;
-	int step1Success = WriteToTag(SectorZeroMsg, SectorZeroBlock, true);
+	// STEP 1: Adjust block 1
+	const BYTE block1msg[16] = { 0x14, 0x01, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1 };
+	BYTE block1Block = 0x01;
+	int step1Success = WriteToTag(block1msg, block1Block, false);
 	if (step1Success != 0) {
-		printf("Error occured while writing trailer sector 0! Terminating.");
+		printf("Error occurred while writing to block 1 of sector 0! Terminating.");
+		return 1;
+	}
+	Sleep(100);
+	
+	// STEP 2: Adjust block 2
+	const BYTE block2msg[16] = { 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1 };
+	BYTE block2Block = 0x02;
+	int step2Success = WriteToTag(block2msg, block2Block, false);
+	if (step2Success != 0) {
+		printf("Error occurred while writing to block 2 of sector 0! Terminating.");
 		return 1;
 	}
 	Sleep(100);
 
-	// STEP 2: Write empty NDEF message to block 0 of sector 1
+	// STEP 3: Adjust trailer sector 0
+	const BYTE SectorZeroMsg[16] = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x78, 0x77, 0x88, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	// const BYTE SectorZeroMsg[16] = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x78, 0x77, 0x88, 0xC1, 0x89, 0xEC, 0xA9, 0x7F, 0x8C, 0x2A };
+	BYTE SectorZeroBlock = 0x03;
+	int step3Success = WriteToTag(SectorZeroMsg, SectorZeroBlock, true);
+	if (step3Success != 0) {
+		printf("Error occurred while writing trailer sector 0! Terminating.");
+		return 1;
+	}
+	Sleep(100);
+
+	// STEP 4: Write empty NDEF message to block 0 of sector 1
 	const BYTE NDEFmsg[16] = { 0x03, 0x00, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 	BYTE NDEFmsgBlock = 0x04;
-	int step2Success = WriteToTag(NDEFmsg, NDEFmsgBlock, false);
-	if (step2Success != 0) {
-		printf("Error occured while writing to block 0 of sector 1! Terminating.");
+	int step4Success = WriteToTag(NDEFmsg, NDEFmsgBlock, false);
+	if (step4Success != 0) {
+		printf("Error occurred while writing to block 0 of sector 1! Terminating.");
 		return 1;
 	}
 	Sleep(100);
 
-	// STEP 3: Adjust trailer sectors of sectors 1-15
+	// STEP 5: Adjust trailer sectors of sectors 1-15
 	const BYTE Msg[16] = { 0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7, 0x7F, 0x07, 0x88, 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 	// get size of global dangerousSectorBlocks array (amount of elements)
 	UINT16 arraySize = sizeof(dangerousSectorBlocks) / sizeof(dangerousSectorBlocks[0]);
 	for (UINT16 i = 0; i < arraySize; ++i) {
 		UINT16 status_code = WriteToTag(Msg, dangerousSectorBlocks[i], true);
 		if (status_code != 0) {
-			printf("Error occured while writing! Terminating.");
+			printf("Error occurred while writing! Terminating.");
 			return 1;
 		}
 		// wait between iterations to be safe (might not be required tho)
 		Sleep(100);
 	}
-
 
 	printf("\nSuccessfully NDEF formatted the card.\n");
 	return 0;
@@ -398,13 +419,19 @@ int FormatNDEF() {
 }
 
 int main() {
-	const BYTE Msg[16] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p' };
-	// const BYTE Msg[16] = { 0x00 };	// empty the given block
-	BYTE block = 0x3D;	// target block for write
+	//const BYTE Msg[16] = { 0x00 };	// empty the given block
+	
+	// block 01
+	//const BYTE Msg[16] = { 0x14, 0x01, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1 };
+	//BYTE block = 0x01;
+	
+	// block 02
+	//const BYTE Msg[16] = { 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1, 0x03, 0xE1 };
+	//BYTE block = 0x02;
 
 	// ----------------------
 	// determine size of array now (because you cant do that later on from a pointer)
-	UINT16 msgSize = sizeof(Msg) / sizeof(Msg[0]);
+	//UINT16 msgSize = sizeof(Msg) / sizeof(Msg[0]);
 	// ----------------------
 
 	// choose function to run (uncomment):
@@ -412,7 +439,7 @@ int main() {
 	// ReadFromTag(block, false);	// true / false (store block content in file dump.txt / dont)
 	// ResetCardContents();	// only works with default keys / sector trailers
 	// DumpCard();
-	// FormatNDEF();
+	FormatNDEF();
 
 	return 0;
 }
