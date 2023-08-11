@@ -19,6 +19,10 @@ const BYTE allowedBlocks[] = {  0x01, 0x02, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A,
 								0x2C, 0x2D, 0x2E, 0x30, 0x31, 0x32, 0x34, 0x35,
 								0x36, 0x38, 0x39, 0x3A, 0x3C, 0x3D, 0x3E };
 
+// any block that is not 0x00 or in allBlocks but not in allowedBlocks
+const BYTE dangerousSectorBlocks[] = { 0x07, 0x0B, 0x0F, 0x13, 0x17, 0x1B, 0x1F,
+									   0x23, 0x27, 0x2B, 0x2F, 0x33, 0x37, 0x3B, 0x3F };
+
 // for dumping entire card (read only)
 const BYTE allBlocks[] = {  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 
 						    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
@@ -105,25 +109,26 @@ void CombineArrays(const BYTE* arr1, UINT16 arr1Length, const BYTE* arr2, UINT16
 	}
 }
 
-int WriteToTag(const BYTE* Msg, BYTE block) {
+int WriteToTag(const BYTE* Msg, BYTE block, bool allowUnsafeTargetBlocks) {
 	bool allowedBlock = false;
-	for (int i = 0; i < sizeof(allowedBlocks); ++i) {
-		if (allowedBlocks[i] == block) {
-			allowedBlock = true;
-			break;
+	
+	if (!allowUnsafeTargetBlocks) {
+		for (int i = 0; i < sizeof(allowedBlocks); ++i) {
+			if (allowedBlocks[i] == block) {
+				allowedBlock = true;
+				break;
+			}
+		}
+	
+		if (!allowedBlock) {
+			wprintf(L"Target block is invalid.\n");
+			return 1;
 		}
 	}
-	if (!allowedBlock) {
-		wprintf(L"Target block is invalid.\n");
-		return 1;
+	// ignore safety and write to given block if true was passed for allowUnsafeTargetBlocks
+	else {
+		allowedBlock = true;
 	}
-
-	/*
-	if (msgLength > 17) {
-		wprintf(L"Your message is too long! Only 16 bytes allowed (excluding mandatory NULL).\n");
-		return 1;
-	}
-	*/
 
 	BYTE APDU_Write[5 + 16] = { 0xff, 0xd6, 0x00, block, 0x10 };	// base command 5 bytes + msg up to 16 bytes
 	UINT16 apduWriteBaseLength = sizeof(APDU_Write) / sizeof(APDU_Write[0]);
@@ -321,7 +326,7 @@ int ResetCardContents() {
 	UINT16 arraySize = sizeof(allowedBlocks) / sizeof(allowedBlocks[0]);
 
 	for (UINT16 i = 0; i < arraySize; ++i) {
-		UINT16 status_code = WriteToTag(Msg, allowedBlocks[i]);
+		UINT16 status_code = WriteToTag(Msg, allowedBlocks[i], false);
 		if (status_code != 0) {
 			printf("Error occured while writing! Terminating.");
 			return 1;
@@ -350,6 +355,48 @@ int DumpCard() {
 	return 0;
 }
 
+// formats the card for NDEF
+int FormatNDEF() {
+	// STEP 1: Adjust trailer sector 0
+	const BYTE SectorZeroMsg[16] = { 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x78, 0x77, 0x88, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	BYTE SectorZeroBlock = 0x03;
+	int step1Success = WriteToTag(SectorZeroMsg, SectorZeroBlock, true);
+	if (step1Success != 0) {
+		printf("Error occured while writing trailer sector 0! Terminating.");
+		return 1;
+	}
+	Sleep(100);
+
+	// STEP 2: Write empty NDEF message to block 0 of sector 1
+	const BYTE NDEFmsg[16] = { 0x03, 0x00, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+	BYTE NDEFmsgBlock = 0x04;
+	int step2Success = WriteToTag(NDEFmsg, NDEFmsgBlock, false);
+	if (step2Success != 0) {
+		printf("Error occured while writing to block 0 of sector 1! Terminating.");
+		return 1;
+	}
+	Sleep(100);
+
+	// STEP 3: Adjust trailer sectors of sectors 1-15
+	const BYTE Msg[16] = { 0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7, 0x7F, 0x07, 0x88, 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+	// get size of global dangerousSectorBlocks array (amount of elements)
+	UINT16 arraySize = sizeof(dangerousSectorBlocks) / sizeof(dangerousSectorBlocks[0]);
+	for (UINT16 i = 0; i < arraySize; ++i) {
+		UINT16 status_code = WriteToTag(Msg, dangerousSectorBlocks[i], true);
+		if (status_code != 0) {
+			printf("Error occured while writing! Terminating.");
+			return 1;
+		}
+		// wait between iterations to be safe (might not be required tho)
+		Sleep(100);
+	}
+
+
+	printf("\nSuccessfully NDEF formatted the card.\n");
+	return 0;
+
+}
+
 int main() {
 	const BYTE Msg[16] = { 'a' , 'b' , 'c', 'd' , 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p' };
 	// const BYTE Msg[16] = { 0x00 };	// empty the given block
@@ -361,10 +408,11 @@ int main() {
 	// ----------------------
 
 	// choose function to run (uncomment):
-	// WriteToTag(Msg, block);
+	// WriteToTag(Msg, block, false);
 	// ReadFromTag(block, false);	// true / false (store block content in file dump.txt / dont)
-	// ResetCardContents();
-	DumpCard();
+	// ResetCardContents();	// only works with default keys / sector trailers
+	// DumpCard();
+	// FormatNDEF();
 
 	return 0;
 }
