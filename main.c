@@ -96,19 +96,6 @@ void CloseReader(PSCARD_DUAL_HANDLE pHandle)
 	SCardReleaseContext(pHandle->hContext);
 }
 
-// combine two byte arrays into one
-void CombineArrays(const BYTE* arr1, UINT16 arr1Length, const BYTE* arr2, UINT16 arr2Length, BYTE* combinedArray) {
-	// Copy data from arr1 to combinedArray
-	for (UINT16 i = 0; i < arr1Length; i++) {
-		combinedArray[i] = arr1[i];
-	}
-
-	// Append data from arr2 to combinedArray
-	for (UINT16 i = 0; i < arr2Length; i++) {
-		combinedArray[arr1Length + i] = arr2[i];
-	}
-}
-
 int WriteToTag(const BYTE* Msg, BYTE block, bool allowUnsafeTargetBlocks) {
 	bool allowedBlock = false;
 	
